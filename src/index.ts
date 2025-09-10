@@ -6,7 +6,7 @@ import dotenv from 'dotenv';
 import authRoutes from './routes/auth';
 import depositsRoutes from './routes/deposits'; 
 import balanceRoutes from './routes/balance';
-
+import pairRoutes from './routes/pairs';
 dotenv.config();
 
 const app = express();
@@ -20,7 +20,7 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/deposits', depositsRoutes); 
 app.use('/api/balance', balanceRoutes);
-
+app.use('/api/pairs', pairRoutes);
 // MongoDB connection
 mongoose.connect(process.env.MONGODB_URI as string)
   .then(() => console.log('MongoDB connected'))
