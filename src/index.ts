@@ -1,8 +1,11 @@
+// index.js
 import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import authRoutes from './routes/auth';
+import depositsRoutes from './routes/deposits'; 
+import balanceRoutes from './routes/balance';
 
 dotenv.config();
 
@@ -15,6 +18,8 @@ app.use(express.json());
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/deposits', depositsRoutes); 
+app.use('/api/balance', balanceRoutes);
 
 // MongoDB connection
 mongoose.connect(process.env.MONGODB_URI as string)
