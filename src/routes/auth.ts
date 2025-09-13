@@ -13,7 +13,13 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ message: 'User already exists' });
     }
 
-    const user: IUser = new User({ email, password, firstName, lastName });
+    const user: IUser = new User({ 
+      email, 
+      password, 
+      firstName, 
+      lastName,
+      aiStatus: false // Explicitly set to false (inactive)
+    });
     await user.save();
 
     const token = jwt.sign(
@@ -29,7 +35,8 @@ router.post('/register', async (req, res) => {
         email: user.email, 
         firstName: user.firstName, 
         lastName: user.lastName,
-        balance: user.balance 
+        balance: user.balance,
+        aiStatus: user.aiStatus // Include aiStatus in response
       } 
     });
   } catch (error) {
@@ -59,7 +66,8 @@ router.post('/login', async (req, res) => {
         email: user.email, 
         firstName: user.firstName, 
         lastName: user.lastName,
-        balance: user.balance 
+        balance: user.balance,
+        aiStatus: user.aiStatus // Include aiStatus in response
       } 
     });
   } catch (error) {
