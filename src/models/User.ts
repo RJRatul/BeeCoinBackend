@@ -8,6 +8,13 @@ export interface IUser extends Document {
   lastName: string;
   balance: number;
   isAdmin: boolean;
+  aiStatus: boolean;
+  transactions: {
+    amount: number;
+    type: string;
+    description: string;
+    createdAt: Date;
+  }[];
   comparePassword(candidatePassword: string): Promise<boolean>;
 }
 
@@ -17,7 +24,14 @@ const UserSchema: Schema = new Schema({
   firstName: { type: String, required: true },
   lastName: { type: String, required: true },
   balance: { type: Number, default: 0 },
-  isAdmin: { type: Boolean, default: false }
+  isAdmin: { type: Boolean, default: false },
+  aiStatus: { type: Boolean, default: false },
+  transactions: [{
+    amount: { type: Number, required: true },
+    type: { type: String, required: true },
+    description: { type: String, required: true },
+    createdAt: { type: Date, default: Date.now }
+  }]
 }, {
   timestamps: true
 });

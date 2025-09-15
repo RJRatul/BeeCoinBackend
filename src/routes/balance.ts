@@ -1,4 +1,3 @@
-// routes/balance.ts (create this file)
 import express, { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import User from '../models/User';
