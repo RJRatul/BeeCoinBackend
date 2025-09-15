@@ -49,7 +49,7 @@ router.patch('/toggle-ai', authenticateToken, async (req: AuthenticatedRequest, 
   }
 });
 
-// Get user profile (including AI status)
+// Get user profile (including AI status and balance)
 router.get('/profile', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = await User.findById(req.user.userId).select('-password');
