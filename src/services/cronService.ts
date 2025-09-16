@@ -21,12 +21,12 @@ class CronService {
   }
 
   initScheduledJobs() {
-    // Schedule daily balance update at 4:10 AM Bangladesh time
-    cron.schedule('10 5 * * *', this.updateActiveUsersBalance.bind(this), {
+    // Schedule daily balance update at 6:00 AM Bangladesh time
+    cron.schedule('0 6 * * *', this.updateActiveUsersBalance.bind(this), {
       timezone: this.timeZone
     });
 
-    console.log('Cron jobs initialized - Will run daily at 5:10 AM Bangladesh time');
+    console.log('Cron jobs initialized - Will run daily at 6:00 AM Bangladesh time');
   }
 
   async updateActiveUsersBalance() {
