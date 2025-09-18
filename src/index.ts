@@ -7,8 +7,10 @@ import depositsRoutes from './routes/deposits';
 import balanceRoutes from './routes/balance';
 import pairRoutes from './routes/pairs';
 import userRoutes from './routes/user';
-import { cronService } from './services/cronService'; // Import the cron service
-
+import profitRulesRoutes from './routes/profitRules'; 
+import cronSettingsRoutes from './routes/cronSettings';
+import adminUsersRoutes from './routes/adminUsers';
+import { cronService } from './services/cronService'; 
 dotenv.config();
 
 const app = express();
@@ -24,7 +26,9 @@ app.use('/api/deposits', depositsRoutes);
 app.use('/api/balance', balanceRoutes);
 app.use('/api/pairs', pairRoutes);
 app.use('/api/user', userRoutes);
-
+app.use('/api/profit-rules', profitRulesRoutes);
+app.use('/api/cron-settings', cronSettingsRoutes);
+app.use('/api/admin/users', adminUsersRoutes);
 // MongoDB connection
 mongoose.connect(process.env.MONGODB_URI as string)
   .then(() => {
