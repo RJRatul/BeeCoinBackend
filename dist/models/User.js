@@ -46,10 +46,16 @@ const UserSchema = new mongoose_1.Schema({
     balance: { type: Number, default: 0 },
     isAdmin: { type: Boolean, default: false },
     aiStatus: { type: Boolean, default: false },
+    status: {
+        type: String,
+        enum: ['active', 'inactive'],
+        default: 'active'
+    },
     transactions: [{
             amount: { type: Number, required: true },
-            type: { type: String, required: true },
+            type: { type: String, required: true, enum: ['credit', 'debit'] },
             description: { type: String, required: true },
+            ruleId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'ProfitRule' },
             createdAt: { type: Date, default: Date.now }
         }]
 }, {

@@ -54,6 +54,7 @@ router.get('/profile', authenticateToken, async (req, res) => {
             firstName: user.firstName,
             lastName: user.lastName,
             balance: user.balance,
+            status: user.status,
             aiStatus: user.aiStatus
         });
     }

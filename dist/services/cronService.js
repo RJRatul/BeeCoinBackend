@@ -6,37 +6,104 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.cronService = void 0;
 const node_cron_1 = __importDefault(require("node-cron"));
 const moment_timezone_1 = __importDefault(require("moment-timezone"));
+const mongoose_1 = __importDefault(require("mongoose"));
 const User_1 = __importDefault(require("../models/User"));
+const ProfitRule_1 = __importDefault(require("../models/ProfitRule"));
+const Settings_1 = __importDefault(require("../models/Settings"));
 class CronService {
     constructor() {
-        this.timeZone = 'Asia/Dhaka'; // Bangladesh time zone
+        this.cronJob = null;
+        this.timeZone = 'Asia/Dhaka';
     }
-    // Helper function to calculate profit based on balance
-    calculateProfit(balance) {
-        if (balance >= 0 && balance <= 25)
-            return 0;
-        if (balance > 25 && balance <= 60)
-            return 1;
-        if (balance > 60 && balance <= 200)
-            return 3;
-        if (balance > 200 && balance <= 500)
-            return 10;
-        if (balance > 500 && balance <= 900)
-            return 18;
-        if (balance > 900 && balance <= 1500)
-            return 30;
-        if (balance > 1500 && balance <= 2000)
-            return 50;
-        // For balances above $2000, you might want to define a rule
-        // For now, let's return 0 for balances above $2000
-        return 0;
+    // Helper function to calculate profit based on active rules
+    async calculateProfit(balance) {
+        try {
+            const activeRule = await ProfitRule_1.default.findOne({
+                minBalance: { $lte: balance },
+                maxBalance: { $gte: balance },
+                isActive: true
+            }).sort({ minBalance: 1 });
+            if (activeRule) {
+                // Properly type cast to IProfitRule and handle the _id
+                const rule = activeRule;
+                return { profit: rule.profit, ruleId: rule._id.toString() };
+            }
+            return { profit: 0 };
+        }
+        catch (error) {
+            console.error('Error calculating profit:', error);
+            return { profit: 0 };
+        }
     }
-    initScheduledJobs() {
-        // Schedule daily balance update at 6:00 AM Bangladesh time
-        node_cron_1.default.schedule('0 6 * * *', this.updateActiveUsersBalance.bind(this), {
+    async initScheduledJobs() {
+        try {
+            // Get the schedule time from settings
+            const settings = await Settings_1.default.findOne().sort({ createdAt: -1 });
+            const scheduleTime = (settings === null || settings === void 0 ? void 0 : settings.cronScheduleTime) || '06:00';
+            this.timeZone = (settings === null || settings === void 0 ? void 0 : settings.timeZone) || 'Asia/Dhaka';
+            // Parse the time
+            const [hours, minutes] = scheduleTime.split(':').map(Number);
+            // Schedule the job
+            this.scheduleJob(hours, minutes);
+            console.log(`Cron jobs initialized - Will run daily at ${scheduleTime} ${this.timeZone}`);
+        }
+        catch (error) {
+            console.error('Error initializing cron jobs:', error);
+            // Fallback to default schedule
+            this.scheduleJob(6, 0);
+            console.log('Cron jobs initialized with fallback - Will run daily at 06:00 Asia/Dhaka');
+        }
+    }
+    scheduleJob(hours, minutes) {
+        // Stop existing job if any
+        if (this.cronJob) {
+            this.cronJob.stop();
+        }
+        // Schedule new job
+        this.cronJob = node_cron_1.default.schedule(`${minutes} ${hours} * * *`, this.updateActiveUsersBalance.bind(this), {
             timezone: this.timeZone
         });
-        console.log('Cron jobs initialized - Will run daily at 6:00 AM Bangladesh time');
+    }
+    async updateCronSchedule(time, timeZone, userId) {
+        try {
+            // Validate time format
+            if (!/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(time)) {
+                throw new Error('Invalid time format. Use HH:mm (e.g., 06:00)');
+            }
+            // Parse the time
+            const [hours, minutes] = time.split(':').map(Number);
+            // Update settings
+            await Settings_1.default.findOneAndUpdate({}, {
+                cronScheduleTime: time,
+                timeZone,
+                updatedBy: userId
+            }, { upsert: true, new: true });
+            // Reschedule the job
+            this.scheduleJob(hours, minutes);
+            this.timeZone = timeZone;
+            console.log(`Cron schedule updated to run daily at ${time} ${timeZone}`);
+            return { success: true, message: `Cron schedule updated to ${time} ${timeZone}` };
+        }
+        catch (error) {
+            console.error('Error updating cron schedule:', error);
+            return { success: false, message: error.message };
+        }
+    }
+    async getCurrentSchedule() {
+        try {
+            const settings = await Settings_1.default.findOne().sort({ createdAt: -1 });
+            return {
+                time: (settings === null || settings === void 0 ? void 0 : settings.cronScheduleTime) || '06:00',
+                timeZone: (settings === null || settings === void 0 ? void 0 : settings.timeZone) || 'Asia/Dhaka'
+            };
+        }
+        catch (error) {
+            console.error('Error getting current schedule:', error);
+            return {
+                time: '06:00',
+                timeZone: 'Asia/Dhaka'
+            };
+        }
     }
     async updateActiveUsersBalance() {
         try {
@@ -54,36 +121,48 @@ class CronService {
             // Process each user individually to calculate custom profit based on their balance
             for (const user of activeUsers) {
                 try {
-                    const profit = this.calculateProfit(user.balance);
-                    if (profit > 0) {
+                    const { profit, ruleId } = await this.calculateProfit(user.balance);
+                    // Allow both positive and negative values
+                    if (profit !== 0) {
+                        // Determine transaction type based on profit value
+                        const transactionType = profit > 0 ? 'credit' : 'debit';
+                        const description = profit > 0
+                            ? 'Daily AI trading profit'
+                            : 'Daily AI trading loss';
+                        // Prepare transaction data
+                        const transactionData = {
+                            amount: Math.abs(profit),
+                            type: transactionType,
+                            description: description,
+                            createdAt: new Date()
+                        };
+                        if (ruleId) {
+                            transactionData.ruleId = new mongoose_1.default.Types.ObjectId(ruleId);
+                        }
                         // Update user's balance and add transaction record
                         const updatedUser = await User_1.default.findByIdAndUpdate(user._id, {
                             $inc: { balance: profit },
-                            $push: {
-                                transactions: {
-                                    amount: profit,
-                                    type: 'credit',
-                                    description: 'Daily AI trading profit',
-                                    createdAt: new Date()
-                                }
-                            }
+                            $push: { transactions: transactionData }
                         }, { new: true });
                         if (updatedUser) {
                             usersUpdated++;
                             totalProfitDistributed += profit;
-                            console.log(`User ${updatedUser.email}: Balance $${user.balance} -> Profit $${profit} -> New Balance $${updatedUser.balance}`);
+                            console.log(`User ${updatedUser.email}: Balance $${user.balance} -> ${profit > 0 ? 'Profit' : 'Loss'} $${Math.abs(profit)} -> New Balance $${updatedUser.balance}`);
                         }
                     }
                     else {
-                        console.log(`User ${user.email}: Balance $${user.balance} -> No profit (below threshold)`);
+                        console.log(`User ${user.email}: Balance $${user.balance} -> No profit/loss (no matching rule)`);
                     }
                 }
                 catch (userError) {
                     console.error(`Error updating user ${user._id}:`, userError);
                 }
             }
+            const resultMessage = totalProfitDistributed >= 0
+                ? `Total $${totalProfitDistributed} profit distributed to users`
+                : `Total $${Math.abs(totalProfitDistributed)} loss applied to users`;
             console.log(`Successfully updated balances for ${usersUpdated} users`);
-            console.log(`Total $${totalProfitDistributed} profit distributed to users`);
+            console.log(resultMessage);
         }
         catch (error) {
             console.error('Error in updateActiveUsersBalance:', error);
