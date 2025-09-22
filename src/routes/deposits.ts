@@ -166,7 +166,7 @@ router.patch('/:id/approve', authenticateToken, requireAdmin, async (req: Authen
       return res.status(400).json({ message: 'Deposit is not pending' });
     }
 
-    // Update user balance AND get the updated user
+    // Update user balance
     const updatedUser = await User.findByIdAndUpdate(
       deposit.userId,
       { $inc: { balance: deposit.amount } },
@@ -179,21 +179,13 @@ router.patch('/:id/approve', authenticateToken, requireAdmin, async (req: Authen
 
     // Update deposit status
     deposit.status = 'approved';
-    
-    // For hardcoded admin, use a special admin ID
-    if (req.user.userId === HARDCODED_ADMIN_USER_ID) {
-      deposit.adminId = HARDCODED_ADMIN_USER_ID as any;
-    } else {
-      deposit.adminId = req.user.userId;
-    }
-    
+    deposit.adminId = req.user.userId === HARDCODED_ADMIN_USER_ID ? HARDCODED_ADMIN_USER_ID as any : req.user.userId;
     deposit.adminNote = adminNote;
-    await deposit.save();
 
-    // PROCESS REFERRAL COMMISSION
+    // PROCESS REFERRAL COMMISSION WITH HISTORICAL RATE
     await CommissionService.processReferralCommission(deposit);
 
-    // Populate user details for the response
+    await deposit.save();
     await deposit.populate('userId', 'firstName lastName email');
 
     res.json({ 

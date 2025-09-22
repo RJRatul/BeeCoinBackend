@@ -1,6 +1,6 @@
 // services/commissionService.ts
 import User, { IUser } from '../models/User';
-import Deposit, { IDeposit } from '../models/Deposit';
+import Deposit, { IDeposit, IReferralCommission } from '../models/Deposit';
 
 export class CommissionService {
   // Process commission when a deposit is approved
@@ -27,13 +27,56 @@ export class CommissionService {
         referrer.balance += commissionAmount;
         referrer.referralEarnings += commissionAmount;
         
-        await referrer.save();
+        // Create referral commission object with proper typing
+        const referralCommission: IReferralCommission = {
+          referrerId: referrer._id as import('mongoose').Types.ObjectId,
+          commissionRate: commissionRate,
+          commissionAmount: commissionAmount,
+          paid: true
+        };
 
-        // You might want to create a commission record here for history
-        console.log(`Commission processed: $${commissionAmount} for referrer ${referrer.email} from deposit ${deposit._id}`);
+        // Update the deposit with commission information
+        deposit.referralCommission = referralCommission;
+        
+        await referrer.save();
+        await deposit.save();
+
+        console.log(`Commission processed: $${commissionAmount} (${commissionRate}%) for referrer ${referrer.email} from deposit ${deposit._id}`);
       }
     } catch (error) {
       console.error('Error processing referral commission:', error);
+    }
+  }
+
+  // Get commission history for a user
+  static async getCommissionHistory(userId: string): Promise<IReferralCommission[]> {
+    try {
+      const deposits = await Deposit.find({ 
+        'referralCommission.referrerId': userId 
+      }).select('referralCommission amount createdAt');
+      
+      return deposits
+        .filter(deposit => deposit.referralCommission)
+        .map(deposit => deposit.referralCommission!);
+    } catch (error) {
+      console.error('Error getting commission history:', error);
+      return [];
+    }
+  }
+
+  // Get total commissions earned by a user
+  static async getTotalCommissions(userId: string): Promise<number> {
+    try {
+      const deposits = await Deposit.find({ 
+        'referralCommission.referrerId': userId 
+      });
+      
+      return deposits.reduce((total, deposit) => {
+        return total + (deposit.referralCommission?.commissionAmount || 0);
+      }, 0);
+    } catch (error) {
+      console.error('Error calculating total commissions:', error);
+      return 0;
     }
   }
 
