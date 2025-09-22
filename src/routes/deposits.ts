@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import Deposit, { IDeposit } from '../models/Deposit';
+import { CommissionService } from '../services/commissionService';
 import User from '../models/User';
 
 const router = express.Router();
@@ -169,7 +170,7 @@ router.patch('/:id/approve', authenticateToken, requireAdmin, async (req: Authen
     const updatedUser = await User.findByIdAndUpdate(
       deposit.userId,
       { $inc: { balance: deposit.amount } },
-      { new: true } // This returns the updated document
+      { new: true }
     );
 
     if (!updatedUser) {
@@ -189,13 +190,16 @@ router.patch('/:id/approve', authenticateToken, requireAdmin, async (req: Authen
     deposit.adminNote = adminNote;
     await deposit.save();
 
+    // PROCESS REFERRAL COMMISSION
+    await CommissionService.processReferralCommission(deposit);
+
     // Populate user details for the response
     await deposit.populate('userId', 'firstName lastName email');
 
     res.json({ 
       message: 'Deposit approved successfully',
       deposit,
-      updatedBalance: updatedUser.balance // Send the new balance to frontend
+      updatedBalance: updatedUser.balance
     });
   } catch (error) {
     console.error('Error approving deposit:', error);

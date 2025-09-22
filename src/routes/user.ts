@@ -65,7 +65,14 @@ router.get('/profile', authenticateToken, async (req: AuthenticatedRequest, res:
       lastName: user.lastName,
       balance: user.balance,
       status: user.status,
-      aiStatus: user.aiStatus
+      aiStatus: user.aiStatus,
+      referralCode: user.referralCode,
+      referralCount: user.referralCount,
+      referralEarnings: user.referralEarnings,
+      level: user.level,
+      tier: user.tier,
+      commissionUnlocked: user.commissionUnlocked,
+      commissionRate: user.getCommissionRate() // Current commission rate
     });
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
