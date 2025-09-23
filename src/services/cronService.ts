@@ -6,7 +6,8 @@ import ProfitRule, { IProfitRule } from '../models/ProfitRule';
 import Settings from '../models/Settings';
 
 class CronService {
-  private cronJob: ScheduledTask | null = null;
+  private balanceUpdateJob: ScheduledTask | null = null;
+  private deactivationJob: ScheduledTask | null = null;
   private timeZone = 'Asia/Dhaka';
 
   // Helper function to calculate profit based on active rules
@@ -41,26 +42,56 @@ class CronService {
       // Parse the time
       const [hours, minutes] = scheduleTime.split(':').map(Number);
       
-      // Schedule the job
-      this.scheduleJob(hours, minutes);
+      // Schedule the balance update job
+      this.scheduleBalanceUpdateJob(hours, minutes);
       
-      console.log(`Cron jobs initialized - Will run daily at ${scheduleTime} ${this.timeZone}`);
+      // Schedule the AI deactivation job 1 minute after balance update
+      this.scheduleDeactivationJob(hours, minutes);
+      
+      console.log(`Cron jobs initialized - Balance update at ${scheduleTime}, Deactivation at ${this.formatTime(hours, minutes + 1)} ${this.timeZone}`);
     } catch (error) {
       console.error('Error initializing cron jobs:', error);
-      // Fallback to default schedule
-      this.scheduleJob(6, 0);
-      console.log('Cron jobs initialized with fallback - Will run daily at 06:00 Asia/Dhaka');
+      // Fallback to default schedules
+      this.scheduleBalanceUpdateJob(6, 0);
+      this.scheduleDeactivationJob(6, 0);
+      console.log('Cron jobs initialized with fallback');
     }
   }
 
-  private scheduleJob(hours: number, minutes: number) {
+  private formatTime(hours: number, minutes: number): string {
+    // Handle minute overflow (e.g., 59 + 1 = 60 → next hour)
+    const totalMinutes = hours * 60 + minutes;
+    const newHours = Math.floor(totalMinutes / 60) % 24;
+    const newMinutes = totalMinutes % 60;
+    return `${newHours.toString().padStart(2, '0')}:${newMinutes.toString().padStart(2, '0')}`;
+  }
+
+  private scheduleBalanceUpdateJob(hours: number, minutes: number) {
     // Stop existing job if any
-    if (this.cronJob) {
-      this.cronJob.stop();
+    if (this.balanceUpdateJob) {
+      this.balanceUpdateJob.stop();
     }
     
     // Schedule new job
-    this.cronJob = cron.schedule(`${minutes} ${hours} * * *`, this.updateActiveUsersBalance.bind(this), {
+    this.balanceUpdateJob = cron.schedule(`${minutes} ${hours} * * *`, this.updateActiveUsersBalance.bind(this), {
+      timezone: this.timeZone
+    });
+  }
+
+  private scheduleDeactivationJob(hours: number, minutes: number) {
+    // Stop existing job if any
+    if (this.deactivationJob) {
+      this.deactivationJob.stop();
+    }
+    
+    // Calculate deactivation time (1 minute after balance update)
+    const deactivationMinutes = minutes + 1;
+    const deactivationHours = deactivationMinutes >= 60 ? hours + 1 : hours;
+    const finalMinutes = deactivationMinutes % 60;
+    const finalHours = deactivationHours % 24;
+
+    // Schedule deactivation job
+    this.deactivationJob = cron.schedule(`${finalMinutes} ${finalHours} * * *`, this.deactivateAllAIStatus.bind(this), {
       timezone: this.timeZone
     });
   }
@@ -86,11 +117,12 @@ class CronService {
         { upsert: true, new: true }
       );
       
-      // Reschedule the job
-      this.scheduleJob(hours, minutes);
+      // Reschedule both jobs
+      this.scheduleBalanceUpdateJob(hours, minutes);
+      this.scheduleDeactivationJob(hours, minutes);
       this.timeZone = timeZone;
       
-      console.log(`Cron schedule updated to run daily at ${time} ${timeZone}`);
+      console.log(`Cron schedule updated - Balance update at ${time}, Deactivation at ${this.formatTime(hours, minutes + 1)} ${timeZone}`);
       return { success: true, message: `Cron schedule updated to ${time} ${timeZone}` };
     } catch (error: any) {
       console.error('Error updating cron schedule:', error);
@@ -101,14 +133,23 @@ class CronService {
   async getCurrentSchedule() {
     try {
       const settings = await Settings.findOne().sort({ createdAt: -1 });
+      const scheduleTime = settings?.cronScheduleTime || '06:00';
+      const timeZone = settings?.timeZone || 'Asia/Dhaka';
+      
+      // Calculate deactivation time
+      const [hours, minutes] = scheduleTime.split(':').map(Number);
+      const deactivationTime = this.formatTime(hours, minutes + 1);
+      
       return {
-        time: settings?.cronScheduleTime || '06:00',
-        timeZone: settings?.timeZone || 'Asia/Dhaka'
+        balanceUpdateTime: scheduleTime,
+        deactivationTime: deactivationTime,
+        timeZone: timeZone
       };
     } catch (error) {
       console.error('Error getting current schedule:', error);
       return {
-        time: '06:00',
+        balanceUpdateTime: '06:00',
+        deactivationTime: '06:01',
         timeZone: 'Asia/Dhaka'
       };
     }
@@ -191,10 +232,68 @@ class CronService {
     }
   }
 
+  // NEW METHOD: Deactivate all AI status 1 minute after balance update
+  async deactivateAllAIStatus() {
+    try {
+      const now = moment().tz(this.timeZone).format('YYYY-MM-DD HH:mm:ss');
+      console.log(`[${now}] Starting AI status deactivation for all users`);
+
+      // Find all users with active AI status
+      const activeUsers = await User.find({ aiStatus: true });
+
+      if (activeUsers.length === 0) {
+        console.log('No active users found for AI deactivation');
+        return;
+      }
+
+      console.log(`Found ${activeUsers.length} users with active AI status to deactivate`);
+
+      // Deactivate AI status for all active users
+      const result = await User.updateMany(
+        { aiStatus: true },
+        { 
+          $set: { aiStatus: false },
+          $push: {
+            transactions: {
+              amount: 0,
+              type: 'system',
+              description: 'AI auto-deactivated after daily balance update',
+              createdAt: new Date()
+            }
+          }
+        }
+      );
+
+      console.log(`Successfully deactivated AI status for ${result.modifiedCount} users at ${now}`);
+      
+    } catch (error) {
+      console.error('Error in deactivateAllAIStatus:', error);
+    }
+  }
+
   // Method to manually trigger balance update (for testing)
   async manualBalanceUpdate() {
     console.log('Manual balance update triggered');
     await this.updateActiveUsersBalance();
+  }
+
+  // Method to manually trigger AI deactivation (for testing)
+  async manualAIDeactivation() {
+    console.log('Manual AI deactivation triggered');
+    await this.deactivateAllAIStatus();
+  }
+
+  // Stop all cron jobs
+  stopAllJobs() {
+    if (this.balanceUpdateJob) {
+      this.balanceUpdateJob.stop();
+      this.balanceUpdateJob = null;
+    }
+    if (this.deactivationJob) {
+      this.deactivationJob.stop();
+      this.deactivationJob = null;
+    }
+    console.log('All cron jobs stopped');
   }
 }
 
