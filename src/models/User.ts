@@ -3,6 +3,7 @@ import mongoose, { Document, Model, Schema } from 'mongoose';
 import bcrypt from 'bcryptjs';
 
 export interface IUser extends Document {
+  userId: string;
   email: string;
   password: string;
   firstName: string;
@@ -15,9 +16,8 @@ export interface IUser extends Document {
   referredBy?: mongoose.Types.ObjectId;
   referralCount: number;
   referralEarnings: number;
-  // New fields for tier system
-  level: number; // 0: Base, 1-5: Levels
-  tier: number; // 1, 2, 3
+  level: number;
+  tier: number;
   commissionUnlocked: boolean;
   comparePassword(candidatePassword: string): Promise<boolean>;
   generateReferralCode(): string;
@@ -25,8 +25,14 @@ export interface IUser extends Document {
   getCommissionRate(): number;
 }
 
-const userSchema = new Schema<IUser>(
+// Define static methods interface
+interface IUserModel extends Model<IUser> {
+  generateUniqueUserId(): Promise<string>;
+}
+
+const userSchema = new Schema<IUser, IUserModel>(
   {
+    userId: { type: String, unique: true },
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
     firstName: { type: String, required: true },
@@ -39,9 +45,8 @@ const userSchema = new Schema<IUser>(
     referredBy: { type: Schema.Types.ObjectId, ref: 'User' },
     referralCount: { type: Number, default: 0 },
     referralEarnings: { type: Number, default: 0 },
-    // New fields
-    level: { type: Number, default: 0 }, // Base level = 0
-    tier: { type: Number, default: 3 }, // Start with tier 3
+    level: { type: Number, default: 0 },
+    tier: { type: Number, default: 3 },
     commissionUnlocked: { type: Boolean, default: false }
   },
   { timestamps: true }
@@ -49,48 +54,60 @@ const userSchema = new Schema<IUser>(
 
 // Commission rate configuration
 const COMMISSION_RATES = {
-  0: { 3: 3, 2: 8, 1: 12 },   // Base level
-  1: { 3: 5, 2: 10, 1: 15 },  // Level 1
-  2: { 3: 6, 2: 12, 1: 18 },  // Level 2
-  3: { 3: 7, 2: 14, 1: 21 },  // Level 3
-  4: { 3: 9, 2: 16, 1: 25 },  // Level 4
-  5: { 3: 12, 2: 18, 1: 30 }  // Level 5
+  0: { 3: 3, 2: 8, 1: 12 },
+  1: { 3: 5, 2: 10, 1: 15 },
+  2: { 3: 6, 2: 12, 1: 18 },
+  3: { 3: 7, 2: 14, 1: 21 },
+  4: { 3: 9, 2: 16, 1: 25 },
+  5: { 3: 12, 2: 18, 1: 30 }
 };
 
 // Thresholds for tier and level upgrades
 const UPGRADE_THRESHOLDS = {
-  // Level 0 (Base)
   0: { tier3: 5, tier2: 6, tier1: 7, nextLevel: 8 },
-  // Level 1
   1: { tier3: 8, tier2: 9, tier1: 10, nextLevel: 11 },
-  // Level 2
   2: { tier3: 11, tier2: 12, tier1: 13, nextLevel: 14 },
-  // Level 3
   3: { tier3: 14, tier2: 15, tier1: 16, nextLevel: 17 },
-  // Level 4
   4: { tier3: 17, tier2: 18, tier1: 19, nextLevel: 20 },
-  // Level 5
-  5: { tier3: 20, tier2: 21, tier1: 22, nextLevel: 1000 } // 1000 means no next level
+  5: { tier3: 20, tier2: 21, tier1: 22, nextLevel: 1000 }
 };
 
-// Method to get commission rate based on current level and tier
+// Static method to generate unique 6-digit numeric UserId
+userSchema.statics.generateUniqueUserId = async function(): Promise<string> {
+  let isUnique = false;
+  let userId = '';
+
+  while (!isUnique) {
+    // Generate 6-digit number (100000 to 999999)
+    const randomNum = Math.floor(100000 + Math.random() * 900000);
+    userId = randomNum.toString();
+    
+    // Check if userId already exists
+    const existingUser = await this.findOne({ userId });
+    if (!existingUser) {
+      isUnique = true;
+    }
+  }
+
+  return userId;
+};
+
+// Method to get commission rate
 userSchema.methods.getCommissionRate = function(): number {
   const rates = COMMISSION_RATES[this.level as keyof typeof COMMISSION_RATES];
   return rates ? rates[this.tier as keyof typeof rates] || 0 : 0;
 };
 
-// Method to update tier and level based on referral count
+// Method to update tier and level
 userSchema.methods.updateTierAndLevel = async function(): Promise<void> {
   const thresholds = UPGRADE_THRESHOLDS[this.level as keyof typeof UPGRADE_THRESHOLDS];
   
   if (!thresholds) return;
 
-  // Check if commission should be unlocked
   if (!this.commissionUnlocked && this.referralCount >= 5) {
     this.commissionUnlocked = true;
   }
 
-  // Update tier based on referral count
   if (this.referralCount >= thresholds.tier1) {
     this.tier = 1;
   } else if (this.referralCount >= thresholds.tier2) {
@@ -99,10 +116,8 @@ userSchema.methods.updateTierAndLevel = async function(): Promise<void> {
     this.tier = 3;
   }
 
-  // Check for level upgrade
   if (this.referralCount >= thresholds.nextLevel && this.level < 5) {
     this.level += 1;
-    // Reset tier to 3 when leveling up
     this.tier = 3;
   }
 
@@ -119,9 +134,13 @@ userSchema.methods.generateReferralCode = function(): string {
   return result;
 };
 
-// Hash password before saving
+// Hash password and generate IDs before saving
 userSchema.pre('save', async function(next) {
-  if (!this.isModified('password')) return next();
+  // Generate userId for new users
+  if (this.isNew && !this.userId) {
+    const UserModel = mongoose.model<IUser, IUserModel>('User');
+    this.userId = await UserModel.generateUniqueUserId();
+  }
 
   // Generate referral code for new users
   if (this.isNew && !this.referralCode) {
@@ -135,7 +154,11 @@ userSchema.pre('save', async function(next) {
     this.referralCode = code;
   }
 
-  this.password = await bcrypt.hash(this.password, 12);
+  // Hash password if modified
+  if (this.isModified('password')) {
+    this.password = await bcrypt.hash(this.password, 12);
+  }
+
   next();
 });
 
@@ -143,4 +166,5 @@ userSchema.methods.comparePassword = async function(candidatePassword: string): 
   return bcrypt.compare(candidatePassword, this.password);
 };
 
-export default mongoose.model<IUser>('User', userSchema);
+// Export with the correct type
+export default mongoose.model<IUser, IUserModel>('User', userSchema);

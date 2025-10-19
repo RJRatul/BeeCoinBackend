@@ -60,6 +60,7 @@ router.get('/profile', authenticateToken, async (req: AuthenticatedRequest, res:
 
     res.json({
       id: user._id,
+      userId: user.userId,
       email: user.email,
       firstName: user.firstName,
       lastName: user.lastName,

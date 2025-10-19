@@ -16,7 +16,6 @@ router.post('/register', async (req, res) => {
 
     let referredByUser = null;
     
-    // Check if referral code is provided and valid
     if (referralCode) {
       referredByUser = await User.findOne({ referralCode });
       if (!referredByUser) {
@@ -51,7 +50,8 @@ router.post('/register', async (req, res) => {
     res.status(201).json({ 
       token, 
       user: { 
-        id: user._id, 
+        id: user._id,
+        userId: user.userId, // Include the new 6-digit userId
         email: user.email, 
         firstName: user.firstName, 
         lastName: user.lastName,
@@ -89,8 +89,9 @@ router.post('/login', async (req, res) => {
     res.json({ 
       token, 
       user: { 
-        id: user._id, 
-        email: user.email, 
+        id: user._id,
+        userId: user.userId, 
+        email: user.email,  
         firstName: user.firstName, 
         lastName: user.lastName,
         balance: user.balance,
