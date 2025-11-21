@@ -293,7 +293,7 @@ class CronService {
       this.deactivationJob.stop();
       this.deactivationJob = null;
     }
-    console.log('All cron jobs stopped');
+    // console.log('All cron jobs stopped');
   }
 }
 
