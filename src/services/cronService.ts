@@ -32,6 +32,16 @@ class CronService {
     }
   }
 
+  // Helper function to calculate profit percentage
+  private calculateProfitPercentage(profitAmount: number, previousBalance: number): number {
+    if (previousBalance === 0) {
+      return profitAmount > 0 ? 100 : (profitAmount < 0 ? -100 : 0);
+    }
+    
+    const percentage = (profitAmount / previousBalance) * 100;
+    return Number(percentage.toFixed(2)); // Return with 2 decimal places
+  }
+
   async initScheduledJobs() {
     try {
       // Get the schedule time from settings
@@ -176,10 +186,14 @@ class CronService {
       // Process each user individually to calculate custom profit based on their balance
       for (const user of activeUsers) {
         try {
-          const { profit, ruleId } = await this.calculateProfit(user.balance);
+          const previousBalance = user.balance; // Store balance before update
+          const { profit, ruleId } = await this.calculateProfit(previousBalance);
           
           // Allow both positive and negative values
           if (profit !== 0) {
+            // Calculate profit percentage based on previous balance
+            const profitPercentage = this.calculateProfitPercentage(profit, previousBalance);
+            
             // Determine transaction type based on profit value
             const transactionType = profit > 0 ? 'credit' : 'debit';
             const description = profit > 0 
@@ -198,11 +212,16 @@ class CronService {
               transactionData.ruleId = new mongoose.Types.ObjectId(ruleId);
             }
 
-            // Update user's balance and add transaction record
+            // Update user's balance, algo profit fields, and add transaction record
             const updatedUser = await User.findByIdAndUpdate(
               user._id,
               {
                 $inc: { balance: profit },
+                $set: { 
+                  algoProfitAmount: profit, // Store the actual profit amount
+                  algoProfitPercentage: profitPercentage, // Store the percentage
+                  lastProfitCalculation: new Date() // Store calculation timestamp
+                },
                 $push: { transactions: transactionData }
               },
               { new: true }
@@ -211,9 +230,20 @@ class CronService {
             if (updatedUser) {
               usersUpdated++;
               totalProfitDistributed += profit;
-              console.log(`User ${updatedUser.email}: Balance $${user.balance} -> ${profit > 0 ? 'Profit' : 'Loss'} $${Math.abs(profit)} -> New Balance $${updatedUser.balance}`);
+              console.log(`User ${updatedUser.email}: Balance $${previousBalance} -> ${profit > 0 ? 'Profit' : 'Loss'} $${Math.abs(profit)} (${profitPercentage}%) -> New Balance $${updatedUser.balance}`);
             }
           } else {
+            // Reset algo profit fields if no profit/loss
+            await User.findByIdAndUpdate(
+              user._id,
+              {
+                $set: { 
+                  algoProfitAmount: 0,
+                  algoProfitPercentage: 0,
+                  lastProfitCalculation: new Date()
+                }
+              }
+            );
             console.log(`User ${user.email}: Balance $${user.balance} -> No profit/loss (no matching rule)`);
           }
         } catch (userError) {

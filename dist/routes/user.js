@@ -118,10 +118,10 @@ router.patch('/users/:id/status', authenticateToken, requireAdmin, async (req, r
     }
 });
 
-// UPDATE USER INFORMATION (Admin only) - NEW ENDPOINT
+// UPDATE USER INFORMATION (Admin only) - UPDATED ENDPOINT
 router.put('/users/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
-        const { firstName, lastName, balance } = req.body;
+        const { firstName, lastName, balance, algoProfitAmount, algoProfitPercentage } = req.body;
         
         // Validate required fields
         if (!firstName || !lastName || balance === undefined) {
@@ -137,11 +137,33 @@ router.put('/users/:id', authenticateToken, requireAdmin, async (req, res) => {
             });
         }
         
+        // Validate algo profit fields if provided
+        if (algoProfitAmount !== undefined && typeof algoProfitAmount !== 'number') {
+            return res.status(400).json({ 
+                message: 'Algo profit amount must be a number' 
+            });
+        }
+        
+        if (algoProfitPercentage !== undefined && typeof algoProfitPercentage !== 'number') {
+            return res.status(400).json({ 
+                message: 'Algo profit percentage must be a number' 
+            });
+        }
+        
         const updateData = {
             firstName: firstName.trim(),
             lastName: lastName.trim(),
             balance: parseFloat(balance.toFixed(2))
         };
+        
+        // Add algo profit fields if provided
+        if (algoProfitAmount !== undefined) {
+            updateData.algoProfitAmount = parseFloat(algoProfitAmount.toFixed(2));
+        }
+        
+        if (algoProfitPercentage !== undefined) {
+            updateData.algoProfitPercentage = parseFloat(algoProfitPercentage.toFixed(2));
+        }
         
         const user = await User_1.default.findByIdAndUpdate(
             req.params.id,
@@ -188,7 +210,7 @@ router.patch('/toggle-ai', authenticateToken, async (req, res) => {
     }
 });
 
-// Get user profile (including AI status and balance)
+// Get user profile (including AI status, balance, and algo profit data) - UPDATED ENDPOINT
 router.get('/profile', authenticateToken, async (req, res) => {
     try {
         const user = await User_1.default.findById(req.user.userId).select('-password');
@@ -197,14 +219,136 @@ router.get('/profile', authenticateToken, async (req, res) => {
         }
         res.json({
             id: user._id,
+            userId: user.userId,
             email: user.email,
             firstName: user.firstName,
             lastName: user.lastName,
             balance: user.balance,
             status: user.status,
-            aiStatus: user.aiStatus
+            aiStatus: user.aiStatus,
+            // New algo profit fields
+            algoProfitAmount: user.algoProfitAmount,
+            algoProfitPercentage: user.algoProfitPercentage,
+            lastProfitCalculation: user.lastProfitCalculation,
+            profitType: user.algoProfitAmount > 0 ? 'profit' : user.algoProfitAmount < 0 ? 'loss' : 'neutral'
         });
     } catch (error) {
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
+// NEW ENDPOINT: Get user profit statistics
+router.get('/profit-stats', authenticateToken, async (req, res) => {
+    try {
+        const user = await User_1.default.findById(req.user.userId).select('-password');
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        res.json({
+            success: true,
+            data: {
+                userId: user.userId,
+                email: user.email,
+                currentBalance: user.balance,
+                algoProfitAmount: user.algoProfitAmount,
+                algoProfitPercentage: user.algoProfitPercentage,
+                lastProfitCalculation: user.lastProfitCalculation,
+                aiStatus: user.aiStatus,
+                profitType: user.algoProfitAmount > 0 ? 'profit' : user.algoProfitAmount < 0 ? 'loss' : 'neutral',
+                // Additional calculated fields
+                absoluteProfit: Math.abs(user.algoProfitAmount),
+                isProfit: user.algoProfitAmount > 0,
+                isLoss: user.algoProfitAmount < 0
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching user profit stats:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+});
+
+// NEW ENDPOINT: Get all users profit statistics (admin only)
+router.get('/profit-stats/all', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const users = await User_1.default.find({}, 'userId email balance algoProfitAmount algoProfitPercentage lastProfitCalculation aiStatus firstName lastName')
+            .sort({ algoProfitAmount: -1 });
+
+        const stats = users.map(user => ({
+            userId: user.userId,
+            email: user.email,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            currentBalance: user.balance,
+            algoProfitAmount: user.algoProfitAmount,
+            algoProfitPercentage: user.algoProfitPercentage,
+            lastProfitCalculation: user.lastProfitCalculation,
+            aiStatus: user.aiStatus,
+            profitType: user.algoProfitAmount > 0 ? 'profit' : user.algoProfitAmount < 0 ? 'loss' : 'neutral',
+            absoluteProfit: Math.abs(user.algoProfitAmount),
+            isProfit: user.algoProfitAmount > 0,
+            isLoss: user.algoProfitAmount < 0
+        }));
+
+        res.json({
+            success: true,
+            data: stats,
+            summary: {
+                totalUsers: users.length,
+                usersWithProfit: users.filter(u => u.algoProfitAmount > 0).length,
+                usersWithLoss: users.filter(u => u.algoProfitAmount < 0).length,
+                usersNeutral: users.filter(u => u.algoProfitAmount === 0).length,
+                totalProfit: users.reduce((sum, u) => sum + (u.algoProfitAmount > 0 ? u.algoProfitAmount : 0), 0),
+                totalLoss: users.reduce((sum, u) => sum + (u.algoProfitAmount < 0 ? u.algoProfitAmount : 0), 0),
+                averageProfitPercentage: users.length > 0 ? 
+                    users.reduce((sum, u) => sum + u.algoProfitPercentage, 0) / users.length : 0,
+                highestProfit: Math.max(...users.map(u => u.algoProfitAmount)),
+                highestProfitPercentage: Math.max(...users.map(u => u.algoProfitPercentage))
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching all users profit stats:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+});
+
+// NEW ENDPOINT: Reset algo profit for a user (admin only)
+router.post('/users/:id/reset-profit', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const user = await User_1.default.findByIdAndUpdate(
+            req.params.id,
+            {
+                $set: {
+                    algoProfitAmount: 0,
+                    algoProfitPercentage: 0,
+                    lastProfitCalculation: null
+                }
+            },
+            { new: true }
+        ).select('-password');
+
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        res.json({
+            message: 'Algo profit data reset successfully',
+            user: {
+                userId: user.userId,
+                email: user.email,
+                algoProfitAmount: user.algoProfitAmount,
+                algoProfitPercentage: user.algoProfitPercentage,
+                lastProfitCalculation: user.lastProfitCalculation
+            }
+        });
+    } catch (error) {
+        console.error('Error resetting algo profit:', error);
         res.status(500).json({ message: 'Server error' });
     }
 });

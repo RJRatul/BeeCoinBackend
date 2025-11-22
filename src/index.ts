@@ -7,7 +7,7 @@ import depositsRoutes from './routes/deposits';
 import withdrawalRoutes from './routes/withdrawal'; 
 import balanceRoutes from './routes/balance';
 import pairRoutes from './routes/pairs';
-import userRoutes from './routes/user';
+import userRoutes from './routes/user'; // This contains the profit-stats endpoint
 import profitRulesRoutes from './routes/profitRules'; 
 import cronSettingsRoutes from './routes/cronSettings';
 import adminUsersRoutes from './routes/adminUsers';
@@ -27,10 +27,11 @@ app.use('/api/deposits', depositsRoutes);
 app.use('/api/withdrawals', withdrawalRoutes);
 app.use('/api/balance', balanceRoutes);
 app.use('/api/pairs', pairRoutes);
-app.use('/api/user', userRoutes);
+app.use('/api/user', userRoutes); // This mounts user routes at /api/user
 app.use('/api/profit-rules', profitRulesRoutes);
 app.use('/api/cron-settings', cronSettingsRoutes);
 app.use('/api/admin/users', adminUsersRoutes);
+
 // MongoDB connection
 mongoose.connect(process.env.MONGODB_URI as string)
   .then(() => {

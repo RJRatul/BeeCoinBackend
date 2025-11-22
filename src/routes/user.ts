@@ -73,10 +73,51 @@ router.get('/profile', authenticateToken, async (req: AuthenticatedRequest, res:
       level: user.level,
       tier: user.tier,
       commissionUnlocked: user.commissionUnlocked,
-      commissionRate: user.getCommissionRate() // Current commission rate
+      commissionRate: user.getCommissionRate(), // Current commission rate
+      // Add the new algo profit fields
+      algoProfitAmount: user.algoProfitAmount || 0,
+      algoProfitPercentage: user.algoProfitPercentage || 0,
+      lastProfitCalculation: user.lastProfitCalculation || null
     });
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// NEW ENDPOINT: Get user profit statistics
+router.get('/profit-stats', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const user = await User.findById(req.user.userId).select('-password');
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const isProfit = user.algoProfitAmount && user.algoProfitAmount > 0;
+    const isLoss = user.algoProfitAmount && user.algoProfitAmount < 0;
+
+    res.json({
+      success: true,
+      data: {
+        userId: user.userId,
+        email: user.email,
+        currentBalance: user.balance,
+        algoProfitAmount: user.algoProfitAmount || 0,
+        algoProfitPercentage: user.algoProfitPercentage || 0,
+        lastProfitCalculation: user.lastProfitCalculation || null,
+        aiStatus: user.aiStatus,
+        profitType: isProfit ? 'profit' : isLoss ? 'loss' : 'neutral',
+        absoluteProfit: Math.abs(user.algoProfitAmount || 0),
+        isProfit: isProfit,
+        isLoss: isLoss
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching user profit stats:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
   }
 });
 

@@ -19,10 +19,17 @@ export interface IUser extends Document {
   level: number;
   tier: number;
   commissionUnlocked: boolean;
+  
+  // New fields for algo profit tracking
+  algoProfitAmount: number;      // Actual profit/loss amount
+  algoProfitPercentage: number;  // Profit/loss percentage based on balance
+  lastProfitCalculation?: Date;  // When last profit was calculated
+  
   comparePassword(candidatePassword: string): Promise<boolean>;
   generateReferralCode(): string;
   updateTierAndLevel(): Promise<void>;
   getCommissionRate(): number;
+  calculateProfitPercentage(profitAmount: number): number; // New method
 }
 
 // Define static methods interface
@@ -47,7 +54,12 @@ const userSchema = new Schema<IUser, IUserModel>(
     referralEarnings: { type: Number, default: 0 },
     level: { type: Number, default: 0 },
     tier: { type: Number, default: 3 },
-    commissionUnlocked: { type: Boolean, default: false }
+    commissionUnlocked: { type: Boolean, default: false },
+    
+    // New fields for algo profit tracking
+    algoProfitAmount: { type: Number, default: 0 },      // Can be positive (profit) or negative (loss)
+    algoProfitPercentage: { type: Number, default: 0 },  // Percentage based on previous balance
+    lastProfitCalculation: { type: Date }                // Timestamp of last calculation
   },
   { timestamps: true }
 );
@@ -90,6 +102,20 @@ userSchema.statics.generateUniqueUserId = async function(): Promise<string> {
   }
 
   return userId;
+};
+
+// Method to calculate profit percentage based on previous balance
+userSchema.methods.calculateProfitPercentage = function(profitAmount: number): number {
+  if (this.balance === 0) {
+    return profitAmount > 0 ? 100 : (profitAmount < 0 ? -100 : 0);
+  }
+  
+  // Calculate percentage: (profitAmount / previous_balance) * 100
+  // Note: We'll calculate the actual percentage in the cron service where we have the previous balance
+  const previousBalance = this.balance; // This is the balance before profit calculation
+  const percentage = (profitAmount / previousBalance) * 100;
+  
+  return Number(percentage.toFixed(2)); // Return with 2 decimal places
 };
 
 // Method to get commission rate
