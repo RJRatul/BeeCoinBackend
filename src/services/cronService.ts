@@ -37,7 +37,7 @@ class CronService {
     if (previousBalance === 0) {
       return profitAmount > 0 ? 100 : (profitAmount < 0 ? -100 : 0);
     }
-    
+
     const percentage = (profitAmount / previousBalance) * 100;
     return Number(percentage.toFixed(2)); // Return with 2 decimal places
   }
@@ -48,16 +48,16 @@ class CronService {
       const settings = await Settings.findOne().sort({ createdAt: -1 });
       const scheduleTime = settings?.cronScheduleTime || '06:00';
       this.timeZone = settings?.timeZone || 'Asia/Dhaka';
-      
+
       // Parse the time
       const [hours, minutes] = scheduleTime.split(':').map(Number);
-      
+
       // Schedule the balance update job
       this.scheduleBalanceUpdateJob(hours, minutes);
-      
+
       // Schedule the AI deactivation job 1 minute after balance update
       this.scheduleDeactivationJob(hours, minutes);
-      
+
       console.log(`Cron jobs initialized - Balance update at ${scheduleTime}, Deactivation at ${this.formatTime(hours, minutes + 1)} ${this.timeZone}`);
     } catch (error) {
       console.error('Error initializing cron jobs:', error);
@@ -81,7 +81,7 @@ class CronService {
     if (this.balanceUpdateJob) {
       this.balanceUpdateJob.stop();
     }
-    
+
     // Schedule new job
     this.balanceUpdateJob = cron.schedule(`${minutes} ${hours} * * *`, this.updateActiveUsersBalance.bind(this), {
       timezone: this.timeZone
@@ -93,7 +93,7 @@ class CronService {
     if (this.deactivationJob) {
       this.deactivationJob.stop();
     }
-    
+
     // Calculate deactivation time (1 minute after balance update)
     const deactivationMinutes = minutes + 1;
     const deactivationHours = deactivationMinutes >= 60 ? hours + 1 : hours;
@@ -115,23 +115,23 @@ class CronService {
 
       // Parse the time
       const [hours, minutes] = time.split(':').map(Number);
-      
+
       // Update settings
       await Settings.findOneAndUpdate(
         {},
-        { 
-          cronScheduleTime: time, 
+        {
+          cronScheduleTime: time,
           timeZone,
-          updatedBy: userId 
+          updatedBy: userId
         },
         { upsert: true, new: true }
       );
-      
+
       // Reschedule both jobs
       this.scheduleBalanceUpdateJob(hours, minutes);
       this.scheduleDeactivationJob(hours, minutes);
       this.timeZone = timeZone;
-      
+
       console.log(`Cron schedule updated - Balance update at ${time}, Deactivation at ${this.formatTime(hours, minutes + 1)} ${timeZone}`);
       return { success: true, message: `Cron schedule updated to ${time} ${timeZone}` };
     } catch (error: any) {
@@ -145,11 +145,11 @@ class CronService {
       const settings = await Settings.findOne().sort({ createdAt: -1 });
       const scheduleTime = settings?.cronScheduleTime || '06:00';
       const timeZone = settings?.timeZone || 'Asia/Dhaka';
-      
+
       // Calculate deactivation time
       const [hours, minutes] = scheduleTime.split(':').map(Number);
       const deactivationTime = this.formatTime(hours, minutes + 1);
-      
+
       return {
         balanceUpdateTime: scheduleTime,
         deactivationTime: deactivationTime,
@@ -188,16 +188,27 @@ class CronService {
         try {
           const previousBalance = user.balance; // Store balance before update
           const { profit, ruleId } = await this.calculateProfit(previousBalance);
-          
+
           // Allow both positive and negative values
           if (profit !== 0) {
             // Calculate profit percentage based on previous balance
             const profitPercentage = this.calculateProfitPercentage(profit, previousBalance);
-            
+
+            // Get current profit data to accumulate
+            const currentAlgoProfitAmount = user.algoProfitAmount || 0;
+            const currentAlgoProfitPercentage = user.algoProfitPercentage || 0;
+
+            // Accumulate profit (add to existing profit)
+            const newAlgoProfitAmount = currentAlgoProfitAmount + profit;
+
+            // Calculate weighted average for percentage
+            const totalProfitEvents = (user.lastProfitCalculation ? 1 : 0) + 1;
+            const newAlgoProfitPercentage = ((currentAlgoProfitPercentage * (totalProfitEvents - 1)) + profitPercentage) / totalProfitEvents;
+
             // Determine transaction type based on profit value
             const transactionType = profit > 0 ? 'credit' : 'debit';
-            const description = profit > 0 
-              ? 'Daily AI trading profit' 
+            const description = profit > 0
+              ? 'Daily AI trading profit'
               : 'Daily AI trading loss';
 
             // Prepare transaction data
@@ -217,9 +228,9 @@ class CronService {
               user._id,
               {
                 $inc: { balance: profit },
-                $set: { 
-                  algoProfitAmount: profit, // Store the actual profit amount
-                  algoProfitPercentage: profitPercentage, // Store the percentage
+                $set: {
+                  algoProfitAmount: newAlgoProfitAmount, // Accumulated profit
+                  algoProfitPercentage: newAlgoProfitPercentage, // Weighted average percentage
                   lastProfitCalculation: new Date() // Store calculation timestamp
                 },
                 $push: { transactions: transactionData }
@@ -230,16 +241,14 @@ class CronService {
             if (updatedUser) {
               usersUpdated++;
               totalProfitDistributed += profit;
-              console.log(`User ${updatedUser.email}: Balance $${previousBalance} -> ${profit > 0 ? 'Profit' : 'Loss'} $${Math.abs(profit)} (${profitPercentage}%) -> New Balance $${updatedUser.balance}`);
+              console.log(`User ${updatedUser.email}: Balance $${previousBalance} -> ${profit > 0 ? 'Profit' : 'Loss'} $${Math.abs(profit)} (${profitPercentage}%) -> New Balance $${updatedUser.balance}, Total Profit: $${newAlgoProfitAmount}`);
             }
           } else {
             // Reset algo profit fields if no profit/loss
             await User.findByIdAndUpdate(
               user._id,
               {
-                $set: { 
-                  algoProfitAmount: 0,
-                  algoProfitPercentage: 0,
+                $set: {
                   lastProfitCalculation: new Date()
                 }
               }
@@ -251,10 +260,10 @@ class CronService {
         }
       }
 
-      const resultMessage = totalProfitDistributed >= 0 
+      const resultMessage = totalProfitDistributed >= 0
         ? `Total $${totalProfitDistributed} profit distributed to users`
         : `Total $${Math.abs(totalProfitDistributed)} loss applied to users`;
-        
+
       console.log(`Successfully updated balances for ${usersUpdated} users`);
       console.log(resultMessage);
     } catch (error) {
@@ -281,7 +290,7 @@ class CronService {
       // Deactivate AI status for all active users
       const result = await User.updateMany(
         { aiStatus: true },
-        { 
+        {
           $set: { aiStatus: false },
           $push: {
             transactions: {
@@ -295,7 +304,7 @@ class CronService {
       );
 
       console.log(`Successfully deactivated AI status for ${result.modifiedCount} users at ${now}`);
-      
+
     } catch (error) {
       console.error('Error in deactivateAllAIStatus:', error);
     }
