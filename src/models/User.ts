@@ -1,4 +1,3 @@
-// models/User.ts
 import mongoose, { Document, Model, Schema } from 'mongoose';
 import bcrypt from 'bcryptjs';
 
@@ -19,23 +18,36 @@ export interface IUser extends Document {
   level: number;
   tier: number;
   commissionUnlocked: boolean;
-  
-  // New fields for algo profit tracking
-  algoProfitAmount: number;      // Actual profit/loss amount
-  algoProfitPercentage: number;  // Profit/loss percentage based on balance
-  lastProfitCalculation?: Date;  // When last profit was calculated
+  algoProfitAmount: number;
+  algoProfitPercentage: number;
+  lastProfitCalculation?: Date;
+  transactions: Array<{
+    amount: number;
+    type: 'credit' | 'debit' | 'system';
+    description: string;
+    ruleId?: mongoose.Types.ObjectId;
+    createdAt: Date;
+    _id: mongoose.Types.ObjectId;
+  }>;
   
   comparePassword(candidatePassword: string): Promise<boolean>;
   generateReferralCode(): string;
   updateTierAndLevel(): Promise<void>;
   getCommissionRate(): number;
-  calculateProfitPercentage(profitAmount: number): number; // New method
+  calculateProfitPercentage(profitAmount: number, previousBalance: number): number;
 }
 
-// Define static methods interface
 interface IUserModel extends Model<IUser> {
   generateUniqueUserId(): Promise<string>;
 }
+
+const TransactionSchema = new Schema({
+  amount: { type: Number, required: true },
+  type: { type: String, enum: ['credit', 'debit', 'system'], required: true },
+  description: { type: String, required: true },
+  ruleId: { type: Schema.Types.ObjectId, ref: 'ProfitRule' },
+  createdAt: { type: Date, default: Date.now }
+}, { _id: true });
 
 const userSchema = new Schema<IUser, IUserModel>(
   {
@@ -48,23 +60,21 @@ const userSchema = new Schema<IUser, IUserModel>(
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },
     aiStatus: { type: Boolean, default: false },
     isAdmin: { type: Boolean, default: false },
-    referralCode: { type: String, unique: true, sparse: true },
+    referralCode: { type: String, unique: true },
     referredBy: { type: Schema.Types.ObjectId, ref: 'User' },
     referralCount: { type: Number, default: 0 },
     referralEarnings: { type: Number, default: 0 },
     level: { type: Number, default: 0 },
     tier: { type: Number, default: 3 },
     commissionUnlocked: { type: Boolean, default: false },
-    
-    // New fields for algo profit tracking
-    algoProfitAmount: { type: Number, default: 0 },      // Can be positive (profit) or negative (loss)
-    algoProfitPercentage: { type: Number, default: 0 },  // Percentage based on previous balance
-    lastProfitCalculation: { type: Date }                // Timestamp of last calculation
+    algoProfitAmount: { type: Number, default: 0 },
+    algoProfitPercentage: { type: Number, default: 0 },
+    lastProfitCalculation: { type: Date },
+    transactions: [TransactionSchema]
   },
   { timestamps: true }
 );
 
-// Commission rate configuration
 const COMMISSION_RATES = {
   0: { 3: 3, 2: 8, 1: 12 },
   1: { 3: 5, 2: 10, 1: 15 },
@@ -74,7 +84,6 @@ const COMMISSION_RATES = {
   5: { 3: 12, 2: 18, 1: 30 }
 };
 
-// Thresholds for tier and level upgrades
 const UPGRADE_THRESHOLDS = {
   0: { tier3: 5, tier2: 6, tier1: 7, nextLevel: 8 },
   1: { tier3: 8, tier2: 9, tier1: 10, nextLevel: 11 },
@@ -90,11 +99,9 @@ userSchema.statics.generateUniqueUserId = async function(): Promise<string> {
   let userId = '';
 
   while (!isUnique) {
-    // Generate 6-digit number (100000 to 999999)
     const randomNum = Math.floor(100000 + Math.random() * 900000);
     userId = randomNum.toString();
     
-    // Check if userId already exists
     const existingUser = await this.findOne({ userId });
     if (!existingUser) {
       isUnique = true;
@@ -104,18 +111,92 @@ userSchema.statics.generateUniqueUserId = async function(): Promise<string> {
   return userId;
 };
 
-// Method to calculate profit percentage based on previous balance
-userSchema.methods.calculateProfitPercentage = function(profitAmount: number): number {
-  if (this.balance === 0) {
+// Method to generate referral code
+userSchema.methods.generateReferralCode = function(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = '';
+  for (let i = 0; i < 8; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+};
+
+// PRE-SAVE HOOK - FIXED VERSION FOR NEW USERS
+userSchema.pre('save', async function(next) {
+  const user = this as IUser;
+  
+  try {
+    // For new users only
+    if (user.isNew) {
+      console.log('🔧 Creating new user, initializing fields...');
+      
+      // 1. Generate userId if not present
+      if (!user.userId) {
+        const UserModel = user.constructor as IUserModel;
+        user.userId = await UserModel.generateUniqueUserId();
+        console.log(`✅ Generated userId: ${user.userId}`);
+      }
+
+      // 2. Generate referral code if not present
+      if (!user.referralCode) {
+        let isUnique = false;
+        let code = '';
+        while (!isUnique) {
+          code = this.generateReferralCode();
+          const existingUser = await mongoose.model('User').findOne({ referralCode: code });
+          if (!existingUser) isUnique = true;
+        }
+        user.referralCode = code;
+        console.log(`✅ Generated referralCode: ${user.referralCode}`);
+      }
+
+      // 3. Initialize ALL required fields for new users
+      // These fields are critical for frontend to work
+      user.balance = user.balance || 0;
+      user.status = 'active'; // Always active for new users
+      user.aiStatus = false; // AI off by default
+      user.isAdmin = false; // Not admin by default
+      user.referralCount = 0;
+      user.referralEarnings = 0;
+      user.level = 0;
+      user.tier = 3;
+      user.commissionUnlocked = false;
+      
+      // CRITICAL: Initialize profit tracking fields
+      user.algoProfitAmount = 0; // Start with 0 profit
+      user.algoProfitPercentage = 0; // Start with 0%
+      user.lastProfitCalculation = undefined; // No profit calculation yet
+      
+      // Initialize empty transactions array
+      user.transactions = [];
+      
+      console.log('✅ All fields initialized for new user');
+      console.log(`   - balance: ${user.balance}`);
+      console.log(`   - algoProfitAmount: ${user.algoProfitAmount}`);
+      console.log(`   - algoProfitPercentage: ${user.algoProfitPercentage}`);
+      console.log(`   - level: ${user.level}, tier: ${user.tier}`);
+    }
+
+    // 4. Hash password if modified
+    if (user.isModified('password')) {
+      user.password = await bcrypt.hash(user.password, 12);
+      console.log('✅ Password hashed');
+    }
+
+    next();
+  } catch (error: any) {
+    console.error('❌ Error in pre-save hook:', error);
+    next(error);
+  }
+});
+
+// Method to calculate profit percentage
+userSchema.methods.calculateProfitPercentage = function(profitAmount: number, previousBalance: number): number {
+  if (previousBalance === 0) {
     return profitAmount > 0 ? 100 : (profitAmount < 0 ? -100 : 0);
   }
-  
-  // Calculate percentage: (profitAmount / previous_balance) * 100
-  // Note: We'll calculate the actual percentage in the cron service where we have the previous balance
-  const previousBalance = this.balance; // This is the balance before profit calculation
   const percentage = (profitAmount / previousBalance) * 100;
-  
-  return Number(percentage.toFixed(2)); // Return with 2 decimal places
+  return Number(percentage.toFixed(2));
 };
 
 // Method to get commission rate
@@ -127,7 +208,6 @@ userSchema.methods.getCommissionRate = function(): number {
 // Method to update tier and level
 userSchema.methods.updateTierAndLevel = async function(): Promise<void> {
   const thresholds = UPGRADE_THRESHOLDS[this.level as keyof typeof UPGRADE_THRESHOLDS];
-  
   if (!thresholds) return;
 
   if (!this.commissionUnlocked && this.referralCount >= 5) {
@@ -150,47 +230,10 @@ userSchema.methods.updateTierAndLevel = async function(): Promise<void> {
   await this.save();
 };
 
-// Generate unique referral code
-userSchema.methods.generateReferralCode = function(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let result = '';
-  for (let i = 0; i < 8; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
-};
-
-// Hash password and generate IDs before saving
-userSchema.pre('save', async function(next) {
-  // Generate userId for new users
-  if (this.isNew && !this.userId) {
-    const UserModel = mongoose.model<IUser, IUserModel>('User');
-    this.userId = await UserModel.generateUniqueUserId();
-  }
-
-  // Generate referral code for new users
-  if (this.isNew && !this.referralCode) {
-    let isUnique = false;
-    let code = '';
-    while (!isUnique) {
-      code = this.generateReferralCode();
-      const existingUser = await mongoose.model('User').findOne({ referralCode: code });
-      if (!existingUser) isUnique = true;
-    }
-    this.referralCode = code;
-  }
-
-  // Hash password if modified
-  if (this.isModified('password')) {
-    this.password = await bcrypt.hash(this.password, 12);
-  }
-
-  next();
-});
-
+// Method to compare password
 userSchema.methods.comparePassword = async function(candidatePassword: string): Promise<boolean> {
   return bcrypt.compare(candidatePassword, this.password);
 };
 
-// Export with the correct type
-export default mongoose.model<IUser, IUserModel>('User', userSchema);
+const User = mongoose.model<IUser, IUserModel>('User', userSchema);
+export default User;

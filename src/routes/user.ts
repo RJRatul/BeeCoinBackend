@@ -4,12 +4,10 @@ import User from '../models/User';
 
 const router = express.Router();
 
-// Define custom interface for authenticated requests
 interface AuthenticatedRequest extends Request {
   user?: any;
 }
 
-// Middleware to verify JWT token
 const authenticateToken = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -27,93 +25,140 @@ const authenticateToken = (req: AuthenticatedRequest, res: Response, next: NextF
   });
 };
 
-// Toggle AI Status (User can toggle their own status)
+// Get user profile - FIXED FOR NEW USERS
+router.get('/profile', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    
+    if (!user) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'User not found' 
+      });
+    }
+
+    // SAFE ACCESS: Use get() or default values for all fields
+    const response = {
+      success: true,
+      data: {
+        id: user._id,
+        userId: user.userId || 'N/A',
+        email: user.email || '',
+        firstName: user.firstName || '',
+        lastName: user.lastName || '',
+        balance: user.balance || 0,
+        status: user.status || 'active',
+        aiStatus: user.aiStatus || false,
+        isAdmin: user.isAdmin || false,
+        referralCode: user.referralCode || 'N/A',
+        referralCount: user.referralCount || 0,
+        referralEarnings: user.referralEarnings || 0,
+        level: user.level || 0,
+        tier: user.tier || 3,
+        commissionUnlocked: user.commissionUnlocked || false,
+        commissionRate: user.getCommissionRate ? user.getCommissionRate() : 0,
+        
+        // CRITICAL: Ensure profit fields always have values
+        algoProfitAmount: user.algoProfitAmount || 0,
+        algoProfitPercentage: user.algoProfitPercentage || 0,
+        lastProfitCalculation: user.lastProfitCalculation || null,
+        
+        // Ensure transactions array exists
+        transactions: user.transactions || []
+      }
+    };
+
+    console.log('📤 Sending user profile:', {
+      userId: response.data.userId,
+      hasProfitAmount: response.data.algoProfitAmount !== undefined,
+      hasProfitPercentage: response.data.algoProfitPercentage !== undefined,
+      transactionsCount: response.data.transactions.length
+    });
+
+    res.json(response);
+  } catch (error) {
+    console.error('❌ Profile fetch error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error' 
+    });
+  }
+});
+
+// Toggle AI Status
 router.patch('/toggle-ai', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = await User.findById(req.user.userId);
     
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      return res.status(404).json({ 
+        success: false,
+        message: 'User not found' 
+      });
     }
 
-    // Toggle the AI status
     user.aiStatus = !user.aiStatus;
     await user.save();
 
     res.json({
+      success: true,
       message: `AI trading ${user.aiStatus ? 'activated' : 'deactivated'} successfully`,
       aiStatus: user.aiStatus
     });
   } catch (error) {
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-// Get user profile (including AI status and balance)
-router.get('/profile', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = await User.findById(req.user.userId).select('-password');
-    
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    res.json({
-      id: user._id,
-      userId: user.userId,
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      balance: user.balance,
-      status: user.status,
-      aiStatus: user.aiStatus,
-      referralCode: user.referralCode,
-      referralCount: user.referralCount,
-      referralEarnings: user.referralEarnings,
-      level: user.level,
-      tier: user.tier,
-      commissionUnlocked: user.commissionUnlocked,
-      commissionRate: user.getCommissionRate(), // Current commission rate
-      // Add the new algo profit fields
-      algoProfitAmount: user.algoProfitAmount || 0,
-      algoProfitPercentage: user.algoProfitPercentage || 0,
-      lastProfitCalculation: user.lastProfitCalculation || null
+    console.error('Toggle AI error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error' 
     });
-  } catch (error) {
-    res.status(500).json({ message: 'Server error' });
   }
 });
 
-// NEW ENDPOINT: Get user profit statistics
+// Get user profit statistics - FIXED FOR NEW USERS
 router.get('/profit-stats', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const user = await User.findById(req.user.userId).select('-password');
+    const user = await User.findById(req.user.userId);
     
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      return res.status(404).json({ 
+        success: false,
+        message: 'User not found' 
+      });
     }
 
-    const isProfit = user.algoProfitAmount && user.algoProfitAmount > 0;
-    const isLoss = user.algoProfitAmount && user.algoProfitAmount < 0;
+    // SAFE ACCESS: Use default values for all fields
+    const algoProfitAmount = user.algoProfitAmount || 0;
+    const algoProfitPercentage = user.algoProfitPercentage || 0;
+    const isProfit = algoProfitAmount > 0;
+    const isLoss = algoProfitAmount < 0;
 
-    res.json({
+    const response = {
       success: true,
       data: {
-        userId: user.userId,
-        email: user.email,
-        currentBalance: user.balance,
-        algoProfitAmount: user.algoProfitAmount || 0,
-        algoProfitPercentage: user.algoProfitPercentage || 0,
+        userId: user.userId || 'N/A',
+        email: user.email || '',
+        currentBalance: user.balance || 0,
+        algoProfitAmount: algoProfitAmount,
+        algoProfitPercentage: algoProfitPercentage,
         lastProfitCalculation: user.lastProfitCalculation || null,
-        aiStatus: user.aiStatus,
+        aiStatus: user.aiStatus || false,
         profitType: isProfit ? 'profit' : isLoss ? 'loss' : 'neutral',
-        absoluteProfit: Math.abs(user.algoProfitAmount || 0),
+        absoluteProfit: Math.abs(algoProfitAmount),
         isProfit: isProfit,
         isLoss: isLoss
       }
+    };
+
+    console.log('📊 Sending profit stats:', {
+      userId: response.data.userId,
+      profitAmount: response.data.algoProfitAmount,
+      profitPercentage: response.data.algoProfitPercentage,
+      hasLastProfitCalc: !!response.data.lastProfitCalculation
     });
+
+    res.json(response);
   } catch (error) {
-    console.error('Error fetching user profit stats:', error);
+    console.error('❌ Error fetching user profit stats:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error'
