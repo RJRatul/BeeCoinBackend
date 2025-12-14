@@ -15,14 +15,17 @@ const authenticateToken = (req: AuthenticatedRequest, res: Response, next: NextF
   const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
+    console.error('❌ No token provided');
     return res.status(401).json({ message: 'Access token required' });
   }
 
   jwt.verify(token, process.env.JWT_SECRET as string, (err: any, user: any) => {
     if (err) {
+      console.error('❌ Token verification failed:', err.message);
       return res.status(403).json({ message: 'Invalid token' });
     }
     req.user = user;
+    console.log('✅ Token verified for user:', user.userId);
     next();
   });
 };
@@ -30,22 +33,45 @@ const authenticateToken = (req: AuthenticatedRequest, res: Response, next: NextF
 // Toggle AI Status (User can toggle their own status)
 router.patch('/toggle-ai', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    console.log('🔄 Toggling AI status for user:', req.user.userId); // Add logging
+    
+    if (!req.user || !req.user.userId) {
+      console.error('❌ No user in request');
+      return res.status(401).json({ 
+        success: false,
+        message: 'User not authenticated' 
+      });
+    }
+
     const user = await User.findById(req.user.userId);
     
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      console.error('❌ User not found for ID:', req.user.userId);
+      return res.status(404).json({ 
+        success: false,
+        message: 'User not found' 
+      });
     }
 
-    // Toggle the AI status
+    console.log(`📊 Current AI status: ${user.aiStatus}, toggling to ${!user.aiStatus}`);
+    
     user.aiStatus = !user.aiStatus;
     await user.save();
 
+    console.log(`✅ AI status updated to: ${user.aiStatus}`);
+
     res.json({
+      success: true,
       message: `AI trading ${user.aiStatus ? 'activated' : 'deactivated'} successfully`,
       aiStatus: user.aiStatus
     });
   } catch (error) {
-    res.status(500).json({ message: 'Server error' });
+    console.error('❌ Toggle AI error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
   }
 });
 
