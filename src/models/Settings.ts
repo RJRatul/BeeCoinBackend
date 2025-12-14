@@ -3,6 +3,7 @@ import mongoose, { Document, Schema } from 'mongoose';
 export interface ISettings extends Document {
   cronScheduleTime: string; // Format: "HH:mm" (e.g., "06:00")
   timeZone: string;
+  marketOffDays: number[]; // Array of day numbers (0=Sunday, 1=Monday, etc.)
   updatedBy: mongoose.Types.ObjectId;
   updatedAt: Date;
 }
@@ -23,6 +24,17 @@ const SettingsSchema: Schema = new Schema({
     type: String, 
     required: true, 
     default: "Asia/Dhaka" 
+  },
+  marketOffDays: {
+    type: [Number],
+    default: [0, 6], // Sunday (0) and Saturday (6) by default
+    validate: {
+      validator: function(days: number[]) {
+        // Check all days are valid (0-6)
+        return days.every(day => day >= 0 && day <= 6);
+      },
+      message: 'Market off days must be numbers between 0 (Sunday) and 6 (Saturday)'
+    }
   },
   updatedBy: { 
     type: Schema.Types.ObjectId, 
