@@ -133,39 +133,6 @@ router.patch('/toggle-ai', authenticateToken, async (req: AuthenticatedRequest, 
   }
 });
 
-// Get user profile (including AI status and balance)
-router.get('/profile', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = await User.findById(req.user.userId).select('-password');
-    
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    res.json({
-      id: user._id,
-      userId: user.userId,
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      balance: user.balance,
-      status: user.status,
-      aiStatus: user.aiStatus,
-      referralCode: user.referralCode,
-      referralCount: user.referralCount,
-      referralEarnings: user.referralEarnings,
-      level: user.level,
-      tier: user.tier,
-      commissionUnlocked: user.commissionUnlocked,
-      commissionRate: user.getCommissionRate(), // Current commission rate
-      // Add the new algo profit fields
-      algoProfitAmount: user.algoProfitAmount || 0,
-      algoProfitPercentage: user.algoProfitPercentage || 0,
-      lastProfitCalculation: user.lastProfitCalculation || null
-    });
-  }
-});
-
 // Get user profit statistics - FIXED FOR NEW USERS
 router.get('/profit-stats', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
